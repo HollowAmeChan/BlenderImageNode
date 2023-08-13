@@ -129,7 +129,7 @@ class ImageNode:  # 新建节点基类
             # 全部socket的默认值
             try:
                 for out_socket in self.outputs:
-                    if out_socket.ho_type in ["IMAGE_COLOR"]:
+                    if out_socket.ho_type in [""]:
                         continue
                     row = layout.row(align=False)
                     row.alignment = 'RIGHT'
@@ -137,7 +137,7 @@ class ImageNode:  # 新建节点基类
                         text=f"{out_socket.name} : {out_socket.socket_value}")
                     row.label(icon="FORWARD")
                 for in_socket in self.inputs:
-                    if out_socket.ho_type in ["IMAGE_COLOR"]:
+                    if out_socket.ho_type in [""]:
                         continue
                     row = layout.row(align=False)
                     row.alignment = 'LEFT'
@@ -151,14 +151,7 @@ class ImageNode:  # 新建节点基类
         # 绘制预览图
         if self.preview_type and self.prev_img is not None:
             img = self.prev_img
-            img_width = img.preview.image_size[0]
-            img_height = img.preview.image_size[1]
-            scale = max(img_width, img_height)
-            draw_img: Any
-            if img_width > img_height:
-                draw_img = layout.row()
-            else:
-                draw_img = layout.column()
+            draw_img = layout.column()
             draw_img.template_icon(img.preview.icon_id,
                                    scale=self.preview_scale)
         # ----------------------------------------------------------------------------
@@ -205,10 +198,8 @@ def socket_prop_update(self, context):
     '''接口prop更新'''
     if self.is_output:  # 输出接口总不触发process
         return
-    if self.node.is_preview:  # 开了预览的节点总运算
-        self.node.root_process(is_linkError_check=False)
-        return
-    if self.node.link_type in ["trans", "root"]:  # 根/运输节点就运算
+    # 开了预览的节点总运算
+    if self.node.is_preview or self.node.link_type in ["trans", "root"]:
         self.node.root_process(is_linkError_check=False)
         return
 
@@ -240,17 +231,14 @@ class SocketFloat(NodeSocket):
 
 class SocketImageColor(NodeSocket):
     '''socket类中,如果socket_value是一个指针变量,我们在这里访问会始终得到None'''
-    bl_idname = 'HO_SocketImageColor'
-    bl_label = "Hollow Socket Image Color/float list"
+    bl_idname = 'HO_SocketImage'
+    bl_label = "Hollow Socket Image/point node_group.imagePool[name]"
 
-    # 特有的双参数,因为原生blender类型的列表需要注册到某个东西上，我这里直接用bytes中转
     socket_value: bpy.props.StringProperty(
-        update=socket_prop_update, subtype="BYTE_STRING")
-    socket_value_bytes_len: bpy.props.IntProperty()
-    socket_size: bpy.props.IntVectorProperty(size=2, update=socket_prop_update)
+        update=socket_prop_update)  # 传递imgPool中的name/img_id两者相同
 
     ho_type: bpy.props.StringProperty(
-        default="IMAGE_COLOR")
+        default="IMAGE")
 
     def draw(self, context, layout, node, text):
         if self.is_output or self.is_linked or self.hide_value:
@@ -259,7 +247,7 @@ class SocketImageColor(NodeSocket):
             layout.prop(self, "socket_value", text=text)
 
     def draw_color(self, context, node):
-        return (0.13, 0.06, 1, 1)  # 紫色
+        return (0.13, 0.06, 1, 1)  # 蓝色
 
 # -------------------------------------------------------------
 # 检查相关

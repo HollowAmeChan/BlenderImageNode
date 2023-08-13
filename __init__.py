@@ -27,6 +27,8 @@ def register():
     panels.register()
     node_base.register()
     node_cat.register()
+    # bpy.types.NodeGroup.imagePool = bpy.props.CollectionProperty(
+    #     type=props.ImagePoolItem)
 
 
 def unregister():

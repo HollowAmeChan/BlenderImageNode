@@ -209,8 +209,8 @@ class ValueTest(ImageNode, Node):
         self.outsct_virtual = self.outputs.new(
             'NodeSocketVirtual', name='Virtual')
 
-        addSocket(self, "in", "HO_SocketImageColor", "ImageColor")
-        addSocket(self, "out", "HO_SocketImageColor", "ImageColor")
+        addSocket(self, "in", "HO_SocketImage", "Image")
+        addSocket(self, "out", "HO_SocketImage", "Image")
 
     def draw_buttons(self, context, layout):
         super().draw_buttons(context, layout)
@@ -263,8 +263,8 @@ class ImageInputNode(ImageNode, Node):
     def init(self, context):
         super().init()
         self.is_preview = True
-        addSocket(self, "out", 'HO_SocketImageColor',
-                  "ImageColor", hide_value=True)
+        addSocket(self, "out", 'HO_SocketImage',
+                  "Image", hide_value=True)
 
     def draw_buttons(self, context, layout):
         super().draw_buttons(context, layout)
@@ -277,33 +277,44 @@ class ImageInputNode(ImageNode, Node):
     def process(self):
         super().process()
         # 拿到socket
-        output = self.outputs.get('ImageColor')
+        output = self.outputs.get("Image")
 
-        # 拿到输入data
-        img_in = self.input_image
+        # 拿到输入data，得到pixels与size
+        img = self.input_image
+        if self.link_type == "root":  # 不是根不读像素
+            pixels_out = img.pixels[:]
+            size_out = img.size[:]
+            name = img.name
 
-        # 运算得到结果
-        pixels_out = img_in.pixels[:]
-        size_out = img_in.size[:]
+            # 在当前node_group下的imgPool创建一个图像副本，存入bytes颜色、bytes长度、size、name
+            node_group = bpy.context.space_data.node_tree.name
 
-        # 输出/打包图片与大小
-        pack = ListBytesPack(pixels_out)
-        output.socket_value = pack[0]
-        output.socket_value_bytes_len = pack[1]
+            pool = bpy.data.node_groups[node_group].imagePool
+            pool_img = pool.get(name)
+            if pool_img is None:  # 池无旧图则新建，否则覆盖
+                pool_img = pool.add()
 
-        output.socket_size = size_out
+            pool_img.name = name
+            pool_img.image_id = name
+            pack = ListBytesPack(pixels_out)
+            pool_img.pixels_bytes = pack[0]
+            pool_img.pixels_bytes_len = pack[1]
+            pool_img.pixels_size = size_out
 
-        # 后处理：输出到预览图/调整节点大小
-        # 这里因为输出的是颜色，故渲染输入的图像
-        self.prev_img = img_in
+            # 传出图像索引名
+            output.socket_value = name
+
+        # 输出到自身预览图
+        self.prev_img = img
+        img_preview_HQupdate(self.prev_img)
+
+        # 调整节点大小
         if self.input_image is None:
             self.size2default()
-        if self.input_image is not None:
-            img_preview_HQupdate(self.prev_img)
-            if self.is_preview:
-                prev_size = self.prev_img.preview.image_size
-                scale = max(prev_size[0], prev_size[1])
-                self.width = scale
+        if not self.is_preview:
+            return
+        scale = self.prev_img.preview.image_size[0]
+        self.width = scale * 2
 
 
 class ImageOutputNode(ImageNode, Node):
@@ -318,43 +329,51 @@ class ImageOutputNode(ImageNode, Node):
     def init(self, context):
         super().init()
         self.is_preview = True
-        addSocket(self, "in", 'HO_SocketImageColor',
-                  "ImageColor", hide_value=True,)
+        addSocket(self, "in", 'HO_SocketImage',
+                  "Image", hide_value=True,)
 
     def draw_buttons(self, context, layout):
         super().draw_buttons(context, layout)
 
     def check_node_ho_type(self):
         check_ho_type(self,
-                      socket_name='ImageColor',
+                      socket_name="Image",
                       location="in",
-                      need_ho_type='IMAGE_COLOR')
+                      need_ho_type='IMAGE')
 
     def process(self):
         super().process()
-        # 拿到socket与数据/image数据需要解包
-        input = self.inputs.get('ImageColor').links[0].from_socket
+        # 拿到socket与数据
+        dataBase = self.inputs.get("Image").links[0].from_socket
 
-        pixels = ListBytesUnpack(bytes=input.socket_value,
-                                 length=input.socket_value_bytes_len)
-        pixels = list(pixels)
-        size = input.socket_size
+        # 从imagPool拿到数据,解包bytes
+        node_group = bpy.context.space_data.node_tree.name
+        name = dataBase.socket_value
+        pool = bpy.data.node_groups[node_group].imagePool
+        pool_img = pool.get(name)
+        pixels = [0]
+        size = [0, 0]
+        if pool_img is not None:
+            pixels_bytes = pool_img.pixels_bytes
+            pixels_bytes_len = pool_img.pixels_bytes_len
+            pixels = list(ListBytesUnpack(
+                bytes=pixels_bytes, length=pixels_bytes_len))
+            size = pool_img.pixels_size
 
-        # 运算并输出data
+        # 检测预览图并输出到预览/调整节点大小
         viewer = bpy.data.images.get("HO_imgViewer")
         if viewer is not None:
             bpy.data.images.remove(bpy.data.images['HO_imgViewer'])
         viewer = bpy.data.images.new(
             "HO_imgViewer", width=size[0], height=size[1])
         viewer.pixels = pixels[:]
-
-        # 输出到预览图/调整节点大小
         self.prev_img = viewer
         img_preview_HQupdate(self.prev_img)
+
         if self.is_preview:
             prev_size = self.prev_img.preview.image_size
             scale = max(prev_size[0], prev_size[1])
-            self.width = scale
+            self.width = scale * 2
 
 
 class TransNode(ImageNode, Node):
@@ -364,26 +383,26 @@ class TransNode(ImageNode, Node):
     def init(self, context):
         super().init()
         # 只能在这里新建(实例化)完了改socket的参数
-        addSocket(self, "in", 'HO_SocketImageColor',
-                  "ImageColor", hide_value=True,)
-        addSocket(self, "out", 'HO_SocketImageColor',
-                  "ImageColor", hide_value=True,)
+        addSocket(self, "in", 'HO_SocketImage',
+                  "Image", hide_value=True,)
+        addSocket(self, "out", 'HO_SocketImage',
+                  "Image", hide_value=True,)
 
     def draw_buttons(self, context, layout):  #
         super().draw_buttons(context, layout)
 
     def check_node_ho_type(self):
         check_ho_type(self,
-                      socket_name='ImageColor',
+                      socket_name="Image",
                       location="in",
-                      need_ho_type='IMAGE_COLOR')
+                      need_ho_type='IMAGE')
 
     def process(self):
         super().process()
 
         # 拿到socket
-        input = self.inputs.get('ImageColor')
-        output = self.outputs.get('ImageColor')
+        input = self.inputs.get("Image")
+        output = self.outputs.get("Image")
 
         # 拿到输入data
         dataBase: Any
@@ -392,21 +411,7 @@ class TransNode(ImageNode, Node):
         if self.link_type in ["trans", "crown"]:  # 有上游
             dataBase = input.links[-1].from_socket
 
-        # 解包
-        pixels = list(ListBytesUnpack(bytes=dataBase.socket_value,
-                                      length=dataBase.socket_value_bytes_len))
-        size = dataBase.socket_size
-
-        # 运算
-        pixels_out = pixels
-        size_out = size
-
-        # 打包输出
-        pack = ListBytesPack(pixels_out)
-        output.socket_value = pack[0]
-        output.socket_value_bytes_len = pack[1]
-
-        output.socket_size = size_out
+        output.socket_value = dataBase.socket_value
 
 
 nodeCat1 = [BaseNode, ImageInputNode, ImageOutputNode, TransNode]
